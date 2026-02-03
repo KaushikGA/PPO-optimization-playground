@@ -8,6 +8,10 @@ from torch.utils.tensorboard import SummaryWriter
 
 BATCH_SIZE = 2048
 LEARNING_RATE = 0.003
+DISCOUNT_FACTOR=0.99
+TOTAL_BATCHES = 500
+TOTAL_EPOCHS = 10
+
 
 class SimpleActor(nn.Module):
     def __init__(self):
@@ -168,7 +172,7 @@ def watch_agent(actor_model):
 global_step = 0
 def train():
     writer = SummaryWriter('runs/PPO_Experiment_1')
-    for _batches in range(500):
+    for _batches in range(TOTAL_BATCHES):
 
         batch_obs, batch_acts, batch_logprobs, batch_env_rews, batch_dones, episode_rewards = getBatchObs(env, actorNetwork, BATCH_SIZE)
 
@@ -179,7 +183,7 @@ def train():
         tensor_batch_Oldlogprobs = torch.stack(batch_logprobs)
         tensor_batch_env_rews = torch.tensor(batch_env_rews, dtype=torch.float32)
 
-        tensor_batch_env_discounted_rewards = calculate_returns(tensor_batch_env_rews, batch_dones,discount_factor=0.99)
+        tensor_batch_env_discounted_rewards = calculate_returns(tensor_batch_env_rews, batch_dones,discount_factor=DISCOUNT_FACTOR)
 
         with torch.no_grad():
             tensor_batch_predicted_rewards = criticNetwork(tensor_batch_obs).squeeze() 
@@ -188,7 +192,7 @@ def train():
 
         avg_ep_reward = np.mean(episode_rewards) if episode_rewards else -1000
 
-        for _epoch in range(10):
+        for _epoch in range(TOTAL_EPOCHS):
 
             tensor_batch_newAlllogprobs = actorNetwork(tensor_batch_obs)
 
