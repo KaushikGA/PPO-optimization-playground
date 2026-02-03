@@ -1,27 +1,25 @@
 import gymnasium as gym
-import time
 import torch
 import torch.nn as nn
-import torch.optim as optim # We need an optimizer to adjust weights
-from tabulate import tabulate
+import torch.optim as optim 
 import numpy as np
 from torch.distributions import Categorical
 from torch.utils.tensorboard import SummaryWriter
 
-writer = SummaryWriter('runs/PPO_Experiment_1')
+BATCH_SIZE = 2048
+LEARNING_RATE = 0.003
 
 class SimpleActor(nn.Module):
     def __init__(self):
         super().__init__()
-        self.layer1 = nn.Linear(8, 64) # Increased neurons slightly
+        self.layer1 = nn.Linear(8, 64) 
         self.layer2 = nn.Linear(64, 64)
         self.layer3 = nn.Linear(64, 4)
-        self.relu = nn.Tanh() # Tanh often works better for PPO than ReLU
+        self.relu = nn.Tanh() #smooth gradients
 
     def forward(self, x):
         x = self.relu(self.layer1(x))
         x = self.relu(self.layer2(x))
-        # OUTPUT: Raw Logits (Not probabilities yet)
         return self.layer3(x)
 
 class SimpleCritic(nn.Module):
@@ -41,8 +39,8 @@ class SimpleCritic(nn.Module):
 
 actorNetwork = SimpleActor()
 criticNetwork = SimpleCritic()
-optimizerActor = optim.Adam(actorNetwork.parameters(), lr=0.003)
-optimizerCritic = optim.Adam(criticNetwork.parameters(), lr=0.003)
+optimizerActor = optim.Adam(actorNetwork.parameters(), lr=LEARNING_RATE)
+optimizerCritic = optim.Adam(criticNetwork.parameters(), lr=LEARNING_RATE)
 
 
 loss_fn_critic = nn.MSELoss()
@@ -50,7 +48,7 @@ loss_fn_critic = nn.MSELoss()
 #env = gym.make("LunarLander-v3", continuous=False, gravity=-10.0,enable_wind=False, wind_power=15.0, turbulence_power=1.5)
 env = gym.make("LunarLander-v3", continuous=False)
 
-BATCH_SIZE = 2048
+
 
 def getBatchObs(env, actorNetwork=None, batch_size=2048):
     
@@ -168,68 +166,74 @@ def watch_agent(actor_model):
 
 
 global_step = 0
-for _batches in range(500):
+def train():
+    writer = SummaryWriter('runs/PPO_Experiment_1')
+    for _batches in range(500):
 
-    batch_obs, batch_acts, batch_logprobs, batch_env_rews, batch_dones, episode_rewards = getBatchObs(env, actorNetwork, BATCH_SIZE)
-
-
-    #tensorBatches
-    tensor_batch_obs = torch.stack(batch_obs)
-    tensor_batch_acts = torch.stack(batch_acts)
-    tensor_batch_Oldlogprobs = torch.stack(batch_logprobs)
-    tensor_batch_env_rews = torch.tensor(batch_env_rews, dtype=torch.float32)
-
-    tensor_batch_env_discounted_rewards = calculate_returns(tensor_batch_env_rews, batch_dones,discount_factor=0.99)
-
-    with torch.no_grad():
-        tensor_batch_predicted_rewards = criticNetwork(tensor_batch_obs).squeeze() 
-        advantages = tensor_batch_env_discounted_rewards - tensor_batch_predicted_rewards.detach()
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-10)
-
-    avg_ep_reward = np.mean(episode_rewards) if episode_rewards else -1000
-
-    for _epoch in range(10):
-
-        tensor_batch_newAlllogprobs = actorNetwork(tensor_batch_obs)
-
-        dist = Categorical(logits=tensor_batch_newAlllogprobs)
-        tensor_batch_Newlogprobs = dist.log_prob(tensor_batch_acts)
-
-        tensor_ratio = torch.exp(tensor_batch_Newlogprobs - tensor_batch_Oldlogprobs)
-        tensor_clipped_ratio = torch.clamp(tensor_ratio, 0.8, 1.2)
-
-        term1 = tensor_ratio*advantages
-        term2 = tensor_clipped_ratio*advantages
-
-        ActorLoss = -torch.mean(torch.min(term1, term2))
-
-        tensor_batch_predicted_rewards_current = criticNetwork(tensor_batch_obs).squeeze() 
-        criticLoss = loss_fn_critic(tensor_batch_predicted_rewards_current.float(), tensor_batch_env_discounted_rewards.float())
+        batch_obs, batch_acts, batch_logprobs, batch_env_rews, batch_dones, episode_rewards = getBatchObs(env, actorNetwork, BATCH_SIZE)
 
 
-        print ( f"Batch {_batches+1}  Epoch {_epoch+1}: Actor Loss = {ActorLoss.item():.4f}, Critic Loss = {criticLoss.item():.4f}, Avg Episode Reward = {avg_ep_reward:.2f}" )
-        
-        optimizerCritic.zero_grad()
-        criticLoss.backward()
-        optimizerCritic.step()
+        #tensorBatches
+        tensor_batch_obs = torch.stack(batch_obs)
+        tensor_batch_acts = torch.stack(batch_acts)
+        tensor_batch_Oldlogprobs = torch.stack(batch_logprobs)
+        tensor_batch_env_rews = torch.tensor(batch_env_rews, dtype=torch.float32)
+
+        tensor_batch_env_discounted_rewards = calculate_returns(tensor_batch_env_rews, batch_dones,discount_factor=0.99)
+
+        with torch.no_grad():
+            tensor_batch_predicted_rewards = criticNetwork(tensor_batch_obs).squeeze() 
+            advantages = tensor_batch_env_discounted_rewards - tensor_batch_predicted_rewards.detach()
+            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-10)
+
+        avg_ep_reward = np.mean(episode_rewards) if episode_rewards else -1000
+
+        for _epoch in range(10):
+
+            tensor_batch_newAlllogprobs = actorNetwork(tensor_batch_obs)
+
+            dist = Categorical(logits=tensor_batch_newAlllogprobs)
+            tensor_batch_Newlogprobs = dist.log_prob(tensor_batch_acts)
+
+            tensor_ratio = torch.exp(tensor_batch_Newlogprobs - tensor_batch_Oldlogprobs)
+            tensor_clipped_ratio = torch.clamp(tensor_ratio, 0.8, 1.2)
+
+            term1 = tensor_ratio*advantages
+            term2 = tensor_clipped_ratio*advantages
+
+            ActorLoss = -torch.mean(torch.min(term1, term2))
+
+            tensor_batch_predicted_rewards_current = criticNetwork(tensor_batch_obs).squeeze() 
+            criticLoss = loss_fn_critic(tensor_batch_predicted_rewards_current.float(), tensor_batch_env_discounted_rewards.float())
 
 
-        optimizerActor.zero_grad()
-        ActorLoss.backward()
-        optimizerActor.step()
-   
-   
+            print ( f"Batch {_batches+1}  Epoch {_epoch+1}: Actor Loss = {ActorLoss.item():.4f}, Critic Loss = {criticLoss.item():.4f}, Avg Episode Reward = {avg_ep_reward:.2f}" )
+            
+            optimizerCritic.zero_grad()
+            criticLoss.backward()
+            optimizerCritic.step()
+
+
+            optimizerActor.zero_grad()
+            ActorLoss.backward()
+            optimizerActor.step()
+    
     
         
-    writer.add_scalar("Loss/Actor", ActorLoss.item(), global_step)
-    writer.add_scalar("Loss/Critic", criticLoss.item(), global_step)
-    writer.add_scalar("Reward/Average", avg_ep_reward, global_step)
-        
-    global_step += BATCH_SIZE
-    if (_batches + 1) % 25 == 0:
-        watch_agent(actorNetwork)
+            
+        writer.add_scalar("Loss/Actor", ActorLoss.item(), global_step)
+        writer.add_scalar("Loss/Critic", criticLoss.item(), global_step)
+        writer.add_scalar("Reward/Average", avg_ep_reward, global_step)
+            
+        global_step += BATCH_SIZE
+        if (_batches + 1) % 25 == 0:
+            watch_agent(actorNetwork)
 
-writer.close()
+    writer.close()
+
+
+if __name__ == "__main__":
+    train() 
 
 #print(actorNetwork.layer2.weight)
 #print(actorNetwork.layer2.weight)
