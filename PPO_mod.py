@@ -169,8 +169,9 @@ def watch_agent(actor_model):
     actor_model.train()
 
 
-global_step = 0
+
 def train():
+    global_step = 0
     writer = SummaryWriter('runs/PPO_Experiment_1')
     for _batches in range(TOTAL_BATCHES):
 
