@@ -1,3 +1,9 @@
+
+<!-- Display the GIF centered -->
+<p align="center">
+  <img src="landerAnimated.gif" alt="Trained Agent Landing" width="600"/>
+</p>
+
 # Proximal Policy Optimization (PPO) for Discrete Control Systems
 
 ## Overview
