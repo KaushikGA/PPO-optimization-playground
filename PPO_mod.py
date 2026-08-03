@@ -1,3 +1,11 @@
+"""From-scratch Proximal Policy Optimization (PPO) for LunarLander-v3.
+
+The agent uses an Actor-Critic architecture with a clipped surrogate
+objective. Training rolls out batches from the current policy, computes
+discounted returns and normalized advantages, then runs several epochs of
+actor (clipped policy) and critic (value) updates per batch.
+"""
+
 import gymnasium as gym
 import torch
 import torch.nn as nn
@@ -14,7 +22,10 @@ TOTAL_EPOCHS = 10
 
 
 class SimpleActor(nn.Module):
+    """Maps a state to action logits for the discrete action space."""
+
     def __init__(self):
+        """Build the 8 -> 64 -> 64 -> 4 fully-connected network with Tanh hidden layers."""
         super().__init__()
         self.layer1 = nn.Linear(8, 64) 
         self.layer2 = nn.Linear(64, 64)
@@ -22,12 +33,16 @@ class SimpleActor(nn.Module):
         self.relu = nn.Tanh() #smooth gradients
 
     def forward(self, x):
+        """Return the action logits (unnormalized scores) for a batch of states `x`."""
         x = self.relu(self.layer1(x))
         x = self.relu(self.layer2(x))
         return self.layer3(x)
 
 class SimpleCritic(nn.Module):
+    """Estimates the state-value function V(s)."""
+
     def __init__(self):
+        """Build the 8 -> 64 -> 64 -> 1 fully-connected network with Tanh hidden layers."""
         super().__init__()
         self.layer1 = nn.Linear(8, 64)
         self.layer2 = nn.Linear(64, 64)
@@ -35,6 +50,7 @@ class SimpleCritic(nn.Module):
         self.relu = nn.Tanh()
 
     def forward(self, x):
+        """Return the scalar value estimate for a batch of states `x`."""
         x = self.relu(self.layer1(x))
         x = self.relu(self.layer2(x))
         return self.layer3(x)
@@ -55,6 +71,13 @@ env = gym.make("LunarLander-v3", continuous=False)
 
 
 def getBatchObs(env, actorNetwork=None, batch_size=2048):
+    """Roll out the policy to collect one batch of experiences.
+
+    Samples `batch_size` transitions from the given environment using the
+    current `actorNetwork`, recording observations, actions, log-probabilities,
+    rewards and done flags. Returns these five lists plus the total reward of
+    each completed episode.
+    """
     
     batch_obs = []
     batch_acts = []
@@ -98,6 +121,11 @@ def getBatchObs(env, actorNetwork=None, batch_size=2048):
     return batch_obs, batch_acts, batch_logprobs, batch_rews, batch_dones, episode_rewards
 
 def trace_graph(root, depth=0):
+    """Debug helper that prints the autograd graph of a tensor or grad_fn.
+
+    Recursively walks `root.grad_fn` back to the leaf nodes (weights/inputs),
+    printing the name of each operation. Intended for inspecting loss graphs.
+    """
     indent = "  " * depth
     
     # 1. If the user passed a Tensor (like ActorLoss), grab its grad_fn
@@ -124,6 +152,12 @@ def trace_graph(root, depth=0):
             break
 
 def calculate_returns(rewards, dones, discount_factor=0.99):
+    """Convert rewards into discounted returns.
+
+    Walks the batch backwards accumulating `R = reward + discount_factor * R`,
+    resetting `R` to zero whenever a done flag is encountered (episode end).
+    Returns a float32 tensor of per-timestep returns.
+    """
     returns = []
     R = 0
     
@@ -138,6 +172,11 @@ def calculate_returns(rewards, dones, discount_factor=0.99):
     return torch.tensor(returns, dtype=torch.float32)
 
 def watch_agent(actor_model):
+    """Play one full episode with the current policy using greedy (argmax) actions.
+
+    Runs a single human-rendered episode to visually inspect performance,
+    then returns the actor to training mode.
+    """
     print("--- WATCHING AGENT PLAY ---")
     test_env = gym.make("LunarLander-v3", continuous=False, render_mode="human")
     
@@ -171,6 +210,13 @@ def watch_agent(actor_model):
 
 
 def train():
+    """Run the full PPO training loop.
+
+    For each of `TOTAL_BATCHES` batches: collect experiences, compute
+    discounted returns and normalized advantages, then perform `TOTAL_EPOCHS`
+    of clipped actor + value updates. Logs losses and average reward to
+    TensorBoard and periodically renders a watching episode.
+    """
     global_step = 0
     writer = SummaryWriter('runs/PPO_Experiment_1')
     for _batches in range(TOTAL_BATCHES):
@@ -238,6 +284,7 @@ def train():
 
 
 if __name__ == "__main__":
+    # Entry point: start training when the script is run directly.
     train() 
 
 #print(actorNetwork.layer2.weight)
